@@ -1,0 +1,27 @@
+# Large model checkpoints — auto-downloaded from pchlenski/gpt2-transcoders
+transcoders/
+
+# Python environment
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Regenerable caches (feature circuits, mean activations)
+.cache/
+
+# LaTeX build artifacts
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.synctex.gz
+
+# OS cruft
+.DS_Store
+
+# Keep: src/, scripts/, tests/, docs/, results/, paper/main.tex, paper/main.pdf, vendor/
+# vendor/ IS committed — it contains the wandb patch needed to run the scripts.
+# Strip its nested git history if present:
+vendor/**/.git/
