@@ -48,18 +48,25 @@ def build_feature_circuit(
     token_pos: int = -1,
     use_cache: bool = True,
     tc_active: bool = True,
+    tc_layers: List[int] = None,
 ) -> List[Tuple[int, int, float]]:
     """Return top-k (layer, feature_idx, c_n) triples for a prompt.
 
-    range_normal: (d_model,) direction in residual stream, e.g. W_U[:,IO] - W_U[:,S].
+    range_normal: (d_model,) direction in residual stream.
     token_pos: position to attribute (default -1 = last token).
-    tc_active: if True, run with all transcoders replacing MLPs so the cache
-        reflects the same activation distribution used during ablation.
+    tc_active: if True, replace tc_layers MLPs with transcoders when building
+        the cache so attribution and ablation share the same activation space.
+    tc_layers: which layers to attribute and replace (default: [11]).
+        Limiting to one layer avoids compounding approximation error.
     """
     from transcoder_circuits.replacement_ctx import TranscoderReplacementContext
 
+    if tc_layers is None:
+        tc_layers = [11]
+
     model_name = "gpt2-small"
-    suffix = "_tc" if tc_active else ""
+    layer_tag = "L" + "_".join(str(l) for l in sorted(tc_layers))
+    suffix = f"_tc{layer_tag}" if tc_active else ""
     cache_path = os.path.join(_CACHE_DIR, f"{_cache_key(prompt, model_name, k)}{suffix}.pkl")
     if use_cache and os.path.exists(cache_path):
         with open(cache_path, "rb") as f:
@@ -68,7 +75,8 @@ def build_feature_circuit(
     with torch.no_grad():
         tokens = model.to_tokens(prompt)
         if tc_active:
-            with TranscoderReplacementContext(model, transcoders):
+            tc_subset = [transcoders[l] for l in tc_layers]
+            with TranscoderReplacementContext(model, tc_subset):
                 _, cache = model.run_with_cache(tokens)
         else:
             _, cache = model.run_with_cache(tokens)
@@ -77,7 +85,8 @@ def build_feature_circuit(
     pos = token_pos if token_pos >= 0 else seq_len + token_pos
 
     all_contribs: List[Tuple[int, int, float]] = []
-    for layer, tc in enumerate(transcoders):
+    for layer in tc_layers:
+        tc = transcoders[layer]
         is_post_ln = ('ln2' in tc.cfg.hook_point and 'normalized' in tc.cfg.hook_point)
         ixg, _ = get_transcoder_ixg(
             tc, cache, range_normal,
@@ -115,8 +124,15 @@ def get_feature_activations(
     transcoders: List[SparseAutoencoder],
     prompt: str,
     token_pos: int = -1,
+    layers: List[int] = None,
 ) -> Dict[int, np.ndarray]:
-    """Return raw feature activations per layer at token_pos (for lazy baseline)."""
+    """Return raw feature activations per layer at token_pos (for lazy baseline).
+
+    layers: which layers to compute activations for (default: [11]).
+    """
+    if layers is None:
+        layers = [11]
+
     with torch.no_grad():
         tokens = model.to_tokens(prompt)
         _, cache = model.run_with_cache(tokens)
@@ -125,7 +141,8 @@ def get_feature_activations(
     pos = token_pos if token_pos >= 0 else seq_len + token_pos
 
     result: Dict[int, np.ndarray] = {}
-    for layer, tc in enumerate(transcoders):
+    for layer in layers:
+        tc = transcoders[layer]
         act_name = get_act_name('normalized', layer, 'ln2')
         feat_acts = tc(cache[act_name])[1][0, pos].detach().cpu().numpy()
         result[layer] = feat_acts

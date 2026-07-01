@@ -22,6 +22,8 @@ def get_model() -> HookedTransformer:
             center_writing_weights=False,
             center_unembed=False,
         )
+        _MODEL.cfg.use_attn_result = True
+        _MODEL.setup()
         _MODEL = _MODEL.cpu().eval()
     return _MODEL
 

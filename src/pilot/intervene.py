@@ -172,15 +172,19 @@ def run_with_transcoders(
     prompt: str,
     io_name: str,
     s_name: str,
+    tc_layers: List[int] = None,
 ) -> float:
-    """Run the model with ALL MLPs replaced by transcoders (no ablation).
+    """Run the model with selected MLP layers replaced by transcoders (no ablation).
 
-    Use this as the baseline (D_tc_full) when computing Faith_S so that
-    ablation effects aren't confounded with transcoder approximation error.
+    tc_layers: which layers to replace (default: [11] — single-layer pivot).
+    Use as the baseline D_tc_full so ablation effects aren't confounded with
+    approximation error from layers that aren't being studied.
     """
-    original_mlps = {l: model.blocks[l].mlp for l in range(len(transcoders))}
-    for l, tc in enumerate(transcoders):
-        model.blocks[l].mlp = _PassthroughWrapper(tc)
+    if tc_layers is None:
+        tc_layers = [11]
+    original_mlps = {l: model.blocks[l].mlp for l in tc_layers}
+    for l in tc_layers:
+        model.blocks[l].mlp = _PassthroughWrapper(transcoders[l])
     try:
         tokens = model.to_tokens(prompt)
         logits = model(tokens)[0, -1]
@@ -201,24 +205,28 @@ def ablate_and_run(
     mean_acts: Dict[int, torch.Tensor],
     io_name: str,
     s_name: str,
+    tc_layers: List[int] = None,
 ) -> float:
     """Replace feature_set with mean activations; return logit-diff D.
 
-    All layers use their transcoder as the MLP replacement so the ablation
-    is measured against the transcoder baseline (D_tc_full), not the original
-    MLP.  Layers NOT in feature_set use a passthrough (unmodified) transcoder.
+    tc_layers: which layers participate in TC replacement (default: [11]).
+    Layers in tc_layers but not in feature_set get a passthrough wrapper.
+    Layers not in tc_layers run as the original MLP — no approximation error.
     """
+    if tc_layers is None:
+        tc_layers = [11]
+
     by_layer: Dict[int, List[int]] = {}
     for layer, feat_idx in feature_set:
         by_layer.setdefault(layer, []).append(feat_idx)
 
     original_mlps = {}
-    for l, tc in enumerate(transcoders):
+    for l in tc_layers:
         original_mlps[l] = model.blocks[l].mlp
         if l in by_layer:
-            model.blocks[l].mlp = _AblationWrapper(tc, by_layer[l], mean_acts[l])
+            model.blocks[l].mlp = _AblationWrapper(transcoders[l], by_layer[l], mean_acts[l])
         else:
-            model.blocks[l].mlp = _PassthroughWrapper(tc)
+            model.blocks[l].mlp = _PassthroughWrapper(transcoders[l])
 
     try:
         tokens = model.to_tokens(prompt)
@@ -240,23 +248,26 @@ def ablate_gt_and_run(
     mean_acts: Dict[int, torch.Tensor],
     high_tok: str,
     low_tok: str,
+    tc_layers: List[int] = None,
 ) -> float:
     """Ablate feature_set on a greater-than prompt; return logit(high) - logit(low).
 
-    All layers use transcoder wrappers so the result is in the same framework
-    as the attribution (consistent with ablate_and_run).
+    tc_layers: which layers participate in TC replacement (default: [11]).
     """
+    if tc_layers is None:
+        tc_layers = [11]
+
     by_layer: Dict[int, List[int]] = {}
     for layer, feat_idx in feature_set:
         by_layer.setdefault(layer, []).append(feat_idx)
 
     original_mlps = {}
-    for l, tc in enumerate(transcoders):
+    for l in tc_layers:
         original_mlps[l] = model.blocks[l].mlp
         if l in by_layer:
-            model.blocks[l].mlp = _AblationWrapper(tc, by_layer[l], mean_acts[l])
+            model.blocks[l].mlp = _AblationWrapper(transcoders[l], by_layer[l], mean_acts[l])
         else:
-            model.blocks[l].mlp = _PassthroughWrapper(tc)
+            model.blocks[l].mlp = _PassthroughWrapper(transcoders[l])
 
     try:
         tokens = model.to_tokens(prompt)
@@ -278,11 +289,17 @@ def run_gt_with_transcoders(
     prompt: str,
     high_tok: str,
     low_tok: str,
+    tc_layers: List[int] = None,
 ) -> float:
-    """TC-baseline D for a greater-than prompt."""
-    original_mlps = {l: model.blocks[l].mlp for l in range(len(transcoders))}
-    for l, tc in enumerate(transcoders):
-        model.blocks[l].mlp = _PassthroughWrapper(tc)
+    """TC-baseline D for a greater-than prompt.
+
+    tc_layers: which layers to replace (default: [11]).
+    """
+    if tc_layers is None:
+        tc_layers = [11]
+    original_mlps = {l: model.blocks[l].mlp for l in tc_layers}
+    for l in tc_layers:
+        model.blocks[l].mlp = _PassthroughWrapper(transcoders[l])
     try:
         tokens = model.to_tokens(prompt)
         logits = model(tokens)[0, -1]
